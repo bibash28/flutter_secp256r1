@@ -1,7 +1,9 @@
 import Foundation
 import Flutter
 import LocalAuthentication
+import OpenSSL
 import UIKit
+import Security
 
 public class SwiftSecureP256Plugin: NSObject, FlutterPlugin {
     public static func register(with registrar: FlutterPluginRegistrar) {
@@ -25,6 +27,19 @@ public class SwiftSecureP256Plugin: NSObject, FlutterPlugin {
                 result(FlutterStandardTypedData(bytes: key))
             } catch {
                 result(FlutterError(code: "getPublicKey", message: error.localizedDescription, details: "\(error)"))
+            }
+        case "getCertificate":
+            do {
+                let param = call.arguments as? Dictionary<String, Any>
+                let tag = param!["tag"] as! String
+                var password : String? = nil
+                if let pwd = param!["password"] as? String {
+                    password = pwd
+                }
+                let certificate = try getCertificate(tag: tag, password: password)!
+                result(certificate)
+            } catch {
+                result(FlutterError(code: "getCertificate", message: error.localizedDescription, details: "\(error)"))
             }
         case "sign":
             do {
@@ -179,6 +194,9 @@ public class SwiftSecureP256Plugin: NSObject, FlutterPlugin {
             }
             throw CustomError.runtimeError("Cannot sign the payload")
         }
+        
+        print("******************* signData  *******************")
+        print(signData)
         return signData as Data
     }
     
@@ -231,6 +249,41 @@ public class SwiftSecureP256Plugin: NSObject, FlutterPlugin {
         ) as Data?
         return sharedSecretData
     }
+    
+    func getCertificate(tag: String, password: String?) throws -> SecCertificate? {
+        let tagData = tag.data(using: .utf8)!
+        var query: [String: Any] = [
+            kSecClass as String                 : kSecClassCertificate,
+            kSecMatchLimit as String            : kSecMatchLimitOne ,
+            kSecReturnRef as String             : true
+        ]
+         
+        if let password = password, !password.isEmpty {
+            let context = LAContext()
+            let newPassword = password.data(using: .utf8)
+            context.setCredential(newPassword, type: .applicationPassword)
+            query[kSecUseAuthenticationContext as String] = context
+        }
+        
+         
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &item)
+        guard status == errSecSuccess else {
+            throw NSError(
+                domain: NSOSStatusErrorDomain,
+                code: Int(status),
+                userInfo: [NSLocalizedDescriptionKey: SecCopyErrorMessageString(status,nil) ?? "Undefined error"]
+            )
+        }
+        
+        
+        if let item = item {
+            return (item as! SecCertificate)
+        } else {
+            return nil
+        }
+    }
+    
     
     internal func getSecKey(tag: String, password: String?) throws -> SecKey?  {
         let tagData = tag.data(using: .utf8)!
